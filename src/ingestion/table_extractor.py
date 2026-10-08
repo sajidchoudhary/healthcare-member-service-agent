@@ -12,6 +12,7 @@ import fitz
 
 DEFAULT_Y_TOLERANCE = 4.0
 DEFAULT_X_GAP = 12.0
+
 MIN_TABLE_ROWS = 2
 MIN_TABLE_COLUMNS = 2
 
@@ -20,12 +21,14 @@ MIN_TABLE_COLUMNS = 2
 # Generic helpers
 # ============================================================
 
+
 def clean_cell(value: Any) -> str:
     """
     Normalize a table cell without aggressively modifying
     insurance-specific content.
 
     We preserve:
+
     - percentages
     - INR amounts
     - numbers
@@ -50,8 +53,12 @@ def clean_cell(value: Any) -> str:
     return " ".join(lines).strip()
 
 
-def normalize_row(row: list[Any]) -> list[str]:
-    """Normalize all cells in a table row."""
+def normalize_row(
+    row: list[Any],
+) -> list[str]:
+    """
+    Normalize all cells in a table row.
+    """
 
     return [
         clean_cell(cell)
@@ -59,8 +66,12 @@ def normalize_row(row: list[Any]) -> list[str]:
     ]
 
 
-def row_is_empty(row: list[str]) -> bool:
-    """Return True if all cells in a row are empty."""
+def row_is_empty(
+    row: list[str],
+) -> bool:
+    """
+    Return True if all cells in a row are empty.
+    """
 
     return not any(
         cell.strip()
@@ -71,7 +82,9 @@ def row_is_empty(row: list[str]) -> bool:
 def remove_empty_rows(
     rows: list[list[str]],
 ) -> list[list[str]]:
-    """Remove completely empty table rows."""
+    """
+    Remove completely empty table rows.
+    """
 
     return [
         row
@@ -88,6 +101,9 @@ def normalize_row_length(
 
     This is important because PDF table extraction can sometimes
     return rows with missing trailing cells.
+
+    This function performs only structural padding.
+    It does not remove or infer semantic columns.
     """
 
     if not rows:
@@ -106,7 +122,9 @@ def normalize_row_length(
             max_columns - len(row)
         )
 
-        normalized.append(padded)
+        normalized.append(
+            padded
+        )
 
     return normalized
 
@@ -114,6 +132,7 @@ def normalize_row_length(
 # ============================================================
 # Table validation
 # ============================================================
+
 
 def is_valid_table(
     rows: list[list[str]],
@@ -129,7 +148,10 @@ def is_valid_table(
         return False
 
     column_count = max(
-        (len(row) for row in rows),
+        (
+            len(row)
+            for row in rows
+        ),
         default=0,
     )
 
@@ -153,25 +175,34 @@ def is_valid_table(
 # Header handling
 # ============================================================
 
+
 def make_headers(
     rows: list[list[str]],
 ) -> tuple[list[str], list[list[str]]]:
     """
-    Convert the first row into headers.
+    Convert the first physical row into headers.
 
-    If a table has no meaningful header, generate generic
-    column names.
+    IMPORTANT:
 
-    Example:
+    This function is intentionally conservative.
 
-        [
-            ["Procedure", "Basic", "Elite"],
-            ["Cataract", "20000", "30000"]
-        ]
+    It does NOT attempt to understand:
 
-    becomes:
+    - multi-level headers
+    - merged cells
+    - insurance plan columns
+    - nested tables
+    - continuation tables
 
-        headers = ["Procedure", "Basic", "Elite"]
+    Those responsibilities belong to:
+
+        table_classifier.py
+        table_normalizer.py
+
+    If the first row contains at least two meaningful values,
+    it is treated as the physical header row.
+
+    Otherwise generic column names are generated.
     """
 
     if not rows:
@@ -185,32 +216,50 @@ def make_headers(
     )
 
     if meaningful_headers >= 2:
+
         headers = []
 
-        for index, cell in enumerate(first_row):
+        for index, cell in enumerate(
+            first_row
+        ):
 
             header = cell.strip()
 
             if not header:
-                header = f"column_{index + 1}"
+                header = (
+                    f"column_{index + 1}"
+                )
 
-            headers.append(header)
+            headers.append(
+                header
+            )
 
-        return headers, rows[1:]
+        return (
+            headers,
+            rows[1:],
+        )
 
-    column_count = len(first_row)
+    column_count = len(
+        first_row
+    )
 
     headers = [
         f"column_{index + 1}"
-        for index in range(column_count)
+        for index in range(
+            column_count
+        )
     ]
 
-    return headers, rows
+    return (
+        headers,
+        rows,
+    )
 
 
 # ============================================================
 # Convert rows into structured records
 # ============================================================
+
 
 def rows_to_records(
     headers: list[str],
@@ -219,16 +268,10 @@ def rows_to_records(
     """
     Convert table rows into dictionaries.
 
-    This makes downstream retrieval and metadata enrichment
-    much easier.
+    This creates a basic structural representation.
 
-    Example:
-
-        {
-            "Procedure/Treatment": "Cataract",
-            "Secure Basic": "20,000",
-            "Secure Elite": "30,000"
-        }
+    Semantic insurance normalization is intentionally handled
+    later by table_normalizer.py.
     """
 
     records = []
@@ -237,7 +280,9 @@ def rows_to_records(
 
         record = {}
 
-        for index, header in enumerate(headers):
+        for index, header in enumerate(
+            headers
+        ):
 
             value = (
                 row[index]
@@ -252,7 +297,9 @@ def rows_to_records(
             value.strip()
             for value in record.values()
         ):
-            records.append(record)
+            records.append(
+                record
+            )
 
     return records
 
@@ -260,6 +307,7 @@ def rows_to_records(
 # ============================================================
 # Table → retrieval-friendly text
 # ============================================================
+
 
 def table_to_text(
     title: str,
@@ -269,20 +317,16 @@ def table_to_text(
     """
     Convert structured table data into retrieval-friendly text.
 
-    We intentionally create explicit key/value relationships.
+    This creates a basic key/value representation.
 
-    Example:
-
-        Procedure/Treatment: Cataract.
-        Secure Basic: 20,000.
-        Secure Elite: 30,000.
-        Secure Supreme: 40,000.
-        Secure Complete: 40,000.
+    Complex semantic relationships are handled later by
+    table_normalizer.py.
     """
 
     parts = []
 
     if title:
+
         parts.append(
             f"Table: {title}"
         )
@@ -301,28 +345,53 @@ def table_to_text(
             )
 
         if row_parts:
+
             parts.append(
-                ". ".join(row_parts) + "."
+                ". ".join(
+                    row_parts
+                ) + "."
             )
 
-    return "\n".join(parts).strip()
+    return "\n".join(
+        parts
+    ).strip()
 
 
 # ============================================================
 # Native PyMuPDF table extraction
 # ============================================================
 
+
 def extract_tables_native(
     page: fitz.Page,
 ) -> list[dict[str, Any]]:
     """
-    Use PyMuPDF's native table detection if available.
+    Extract tables using PyMuPDF native table detection.
 
-    PyMuPDF versions differ in table API availability, so this
-    function intentionally fails gracefully.
+    IMPORTANT:
+
+    This function performs only SAFE structural normalization.
+
+    It does NOT:
+
+        - merge semantic headers
+        - remove physical columns
+        - merge continuation rows
+        - infer insurance plan structures
+        - infer table families
+
+    Those operations belong to:
+
+        table_classifier.py
+        table_normalizer.py
+
+    The cleaned physical rows are preserved in ``raw_rows``.
     """
 
-    if not hasattr(page, "find_tables"):
+    if not hasattr(
+        page,
+        "find_tables",
+    ):
         return []
 
     try:
@@ -330,6 +399,7 @@ def extract_tables_native(
         finder = page.find_tables()
 
     except Exception:
+
         return []
 
     tables = getattr(
@@ -340,28 +410,67 @@ def extract_tables_native(
 
     extracted_tables = []
 
-    for table_index, table in enumerate(tables, start=1):
+    for table_index, table in enumerate(
+        tables,
+        start=1,
+    ):
 
         try:
+
             raw_rows = table.extract()
+
         except Exception:
+
             continue
 
         if not raw_rows:
             continue
+
+        # ----------------------------------------------------
+        # SAFE STRUCTURAL NORMALIZATION
+        # ----------------------------------------------------
+        #
+        # We only:
+        #
+        #   1. Clean cell values
+        #   2. Remove completely empty rows
+        #   3. Pad rows to the same physical width
+        #
+        # We intentionally DO NOT:
+        #
+        #   - merge multi-level headers
+        #   - remove spacer columns
+        #   - merge continuation rows
+        #   - infer plan columns
+        #
+        # Those operations are table-family specific.
+        # ----------------------------------------------------
 
         rows = [
             normalize_row(row)
             for row in raw_rows
         ]
 
-        rows = remove_empty_rows(rows)
-        rows = normalize_row_length(rows)
+        rows = remove_empty_rows(
+            rows
+        )
 
-        if not is_valid_table(rows):
+        rows = normalize_row_length(
+            rows
+        )
+
+        if not is_valid_table(
+            rows
+        ):
             continue
 
-        headers, data_rows = make_headers(rows)
+        # ----------------------------------------------------
+        # Basic physical header representation.
+        # ----------------------------------------------------
+
+        headers, data_rows = make_headers(
+            rows
+        )
 
         records = rows_to_records(
             headers,
@@ -383,10 +492,19 @@ def extract_tables_native(
         extracted_tables.append(
             {
                 "table_index": table_index,
+
                 "bbox": bbox,
+
+                # Basic structural representation.
                 "headers": headers,
                 "rows": data_rows,
                 "records": records,
+
+                # IMPORTANT:
+                # Preserve the complete cleaned physical
+                # table structure for downstream normalization.
+                "raw_rows": rows,
+
                 "extraction_method": "pymupdf",
             }
         )
@@ -397,6 +515,7 @@ def extract_tables_native(
 # ============================================================
 # Fallback: word-coordinate table reconstruction
 # ============================================================
+
 
 def get_page_words(
     page: fitz.Page,
@@ -458,7 +577,9 @@ def group_words_into_lines(
         ),
     )
 
-    lines: list[list[dict[str, Any]]] = []
+    lines: list[
+        list[dict[str, Any]]
+    ] = []
 
     for word in sorted_words:
 
@@ -466,20 +587,31 @@ def group_words_into_lines(
 
         for line in lines:
 
-            reference_y = line[0]["y0"]
+            reference_y = (
+                line[0]["y0"]
+            )
 
             if abs(
-                word["y0"] - reference_y
+                word["y0"]
+                - reference_y
             ) <= y_tolerance:
 
-                line.append(word)
+                line.append(
+                    word
+                )
+
                 placed = True
+
                 break
 
         if not placed:
-            lines.append([word])
+
+            lines.append(
+                [word]
+            )
 
     for line in lines:
+
         line.sort(
             key=lambda word: word["x0"]
         )
@@ -506,16 +638,23 @@ def line_to_cells(
         line[0]["text"]
     ]
 
-    previous_x1 = line[0]["x1"]
+    previous_x1 = (
+        line[0]["x1"]
+    )
 
     for word in line[1:]:
 
-        gap = word["x0"] - previous_x1
+        gap = (
+            word["x0"]
+            - previous_x1
+        )
 
         if gap >= x_gap:
 
             cells.append(
-                " ".join(current_words)
+                " ".join(
+                    current_words
+                )
             )
 
             current_words = [
@@ -531,7 +670,9 @@ def line_to_cells(
         previous_x1 = word["x1"]
 
     cells.append(
-        " ".join(current_words)
+        " ".join(
+            current_words
+        )
     )
 
     return [
@@ -548,9 +689,13 @@ def detect_fallback_table(
 
     This is intentionally conservative because normal policy
     paragraphs can also contain multiple visual gaps.
+
+    Semantic normalization is NOT performed here.
     """
 
-    words = get_page_words(page)
+    words = get_page_words(
+        page
+    )
 
     if not words:
         return []
@@ -563,9 +708,12 @@ def detect_fallback_table(
 
     for line in lines:
 
-        cells = line_to_cells(line)
+        cells = line_to_cells(
+            line
+        )
 
         if len(cells) >= MIN_TABLE_COLUMNS:
+
             candidate_rows.append(
                 cells
             )
@@ -577,8 +725,13 @@ def detect_fallback_table(
     # Find contiguous runs of table-like rows.
     # --------------------------------------------------------
 
-    runs: list[list[list[str]]] = []
-    current_run: list[list[str]] = []
+    runs: list[
+        list[list[str]]
+    ] = []
+
+    current_run: list[
+        list[str]
+    ] = []
 
     for row in candidate_rows:
 
@@ -590,28 +743,47 @@ def detect_fallback_table(
                     current_run[-1]
                 )
 
-                current_width = len(row)
+                current_width = len(
+                    row
+                )
 
                 # Allow small differences caused by PDF layout.
                 if abs(
-                    previous_width - current_width
+                    previous_width
+                    - current_width
                 ) <= 1:
 
-                    current_run.append(row)
+                    current_run.append(
+                        row
+                    )
 
                 else:
 
-                    if len(current_run) >= MIN_TABLE_ROWS:
-                        runs.append(current_run)
+                    if len(
+                        current_run
+                    ) >= MIN_TABLE_ROWS:
 
-                    current_run = [row]
+                        runs.append(
+                            current_run
+                        )
+
+                    current_run = [
+                        row
+                    ]
 
             else:
 
-                current_run = [row]
+                current_run = [
+                    row
+                ]
 
-    if len(current_run) >= MIN_TABLE_ROWS:
-        runs.append(current_run)
+    if len(
+        current_run
+    ) >= MIN_TABLE_ROWS:
+
+        runs.append(
+            current_run
+        )
 
     tables = []
 
@@ -624,7 +796,9 @@ def detect_fallback_table(
             rows
         )
 
-        if not is_valid_table(rows):
+        if not is_valid_table(
+            rows
+        ):
             continue
 
         headers, data_rows = make_headers(
@@ -642,11 +816,20 @@ def detect_fallback_table(
         tables.append(
             {
                 "table_index": table_index,
+
                 "bbox": None,
+
                 "headers": headers,
                 "rows": data_rows,
                 "records": records,
-                "extraction_method": "coordinate_fallback",
+
+                # Preserve physical rows for downstream
+                # semantic normalization.
+                "raw_rows": rows,
+
+                "extraction_method": (
+                    "coordinate_fallback"
+                ),
             }
         )
 
@@ -657,6 +840,7 @@ def detect_fallback_table(
 # Deduplication
 # ============================================================
 
+
 def table_signature(
     table: dict[str, Any],
 ) -> tuple:
@@ -666,7 +850,10 @@ def table_signature(
     """
 
     headers = tuple(
-        table.get("headers", [])
+        table.get(
+            "headers",
+            [],
+        )
     )
 
     first_rows = tuple(
@@ -686,8 +873,12 @@ def table_signature(
 def deduplicate_tables(
     tables: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    """
+    Remove duplicate table structures.
+    """
 
     seen = set()
+
     unique = []
 
     for table in tables:
@@ -699,8 +890,13 @@ def deduplicate_tables(
         if signature in seen:
             continue
 
-        seen.add(signature)
-        unique.append(table)
+        seen.add(
+            signature
+        )
+
+        unique.append(
+            table
+        )
 
     return unique
 
@@ -709,30 +905,45 @@ def deduplicate_tables(
 # Main extraction
 # ============================================================
 
+
 def extract_tables(
     pdf_path: Path,
 ) -> dict[str, Any]:
     """
-    Extract structured tables from the PDF.
+    Extract structured/raw tables from the PDF.
 
     Strategy:
 
         1. Open PDF using PyMuPDF.
         2. Attempt native table extraction.
         3. Fall back to coordinate-based reconstruction.
-        4. Normalize tables.
-        5. Preserve page numbers and bounding boxes.
-        6. Generate retrieval-friendly table text.
+        4. Perform only safe structural normalization.
+        5. Preserve raw physical rows.
+        6. Preserve page numbers and bounding boxes.
+        7. Generate retrieval-friendly structural text.
+        8. Deduplicate tables.
+
+    IMPORTANT:
+
+    This function does NOT perform insurance-specific semantic
+    normalization.
+
+    Semantic interpretation belongs to:
+
+        table_classifier.py
+        table_normalizer.py
 
     Returns:
 
         {
             "document": {...},
+            "table_count": int,
             "tables": [...]
         }
     """
 
     if not pdf_path.exists():
+
         raise FileNotFoundError(
             f"PDF not found: {pdf_path}"
         )
@@ -740,7 +951,10 @@ def extract_tables(
     document = fitz.open(
         pdf_path
     )
-    page_count = len(document)
+
+    page_count = len(
+        document
+    )
 
     tables = []
 
@@ -755,7 +969,9 @@ def extract_tables(
                 page
             )
 
-            extraction_method = "pymupdf"
+            extraction_method = (
+                "pymupdf"
+            )
 
             # ------------------------------------------------
             # Fallback only when native extraction finds
@@ -784,6 +1000,13 @@ def extract_tables(
                     f"{table['table_index']}"
                 )
 
+                # ------------------------------------------------
+                # Structural retrieval text.
+                #
+                # This is intentionally based on the physical
+                # table representation.
+                # ------------------------------------------------
+
                 table["text"] = table_to_text(
                     title="",
                     headers=table["headers"],
@@ -800,23 +1023,34 @@ def extract_tables(
                     "extraction_method"
                 ] = extraction_method
 
-                tables.append(table)
+                tables.append(
+                    table
+                )
 
     finally:
 
         document.close()
 
+    # --------------------------------------------------------
+    # Remove duplicate physical tables.
+    # --------------------------------------------------------
+
     tables = deduplicate_tables(
         tables
     )
 
+    # --------------------------------------------------------
     # Re-number IDs after deduplication.
+    # --------------------------------------------------------
+
     for index, table in enumerate(
         tables,
         start=1,
     ):
 
-        table["global_table_index"] = index
+        table["global_table_index"] = (
+            index
+        )
 
         table["table_id"] = (
             f"table_{index:05d}"
@@ -836,6 +1070,7 @@ def extract_tables(
 # Validation
 # ============================================================
 
+
 def validate_tables(
     table_data: dict[str, Any],
 ) -> list[str]:
@@ -849,20 +1084,26 @@ def validate_tables(
     errors = []
 
     if "tables" not in table_data:
+
         errors.append(
             "Missing 'tables' field."
         )
+
         return errors
 
-    tables = table_data["tables"]
+    tables = table_data[
+        "tables"
+    ]
 
     if not isinstance(
         tables,
         list,
     ):
+
         errors.append(
             "'tables' must be a list."
         )
+
         return errors
 
     table_ids = set()
@@ -874,26 +1115,35 @@ def validate_tables(
         )
 
         if not table_id:
+
             errors.append(
                 "Table missing table_id."
             )
 
         elif table_id in table_ids:
+
             errors.append(
-                f"Duplicate table_id: {table_id}"
+                f"Duplicate table_id: "
+                f"{table_id}"
             )
 
         else:
-            table_ids.add(table_id)
+
+            table_ids.add(
+                table_id
+            )
 
         page_number = table.get(
             "page_number"
         )
 
-        if not isinstance(
-            page_number,
-            int,
-        ) or page_number <= 0:
+        if (
+            not isinstance(
+                page_number,
+                int,
+            )
+            or page_number <= 0
+        ):
 
             errors.append(
                 f"Invalid page number for "
@@ -912,10 +1162,13 @@ def validate_tables(
             "records"
         )
 
-        if not isinstance(
-            headers,
-            list,
-        ) or not headers:
+        if (
+            not isinstance(
+                headers,
+                list,
+            )
+            or not headers
+        ):
 
             errors.append(
                 f"Missing headers for "
@@ -942,14 +1195,31 @@ def validate_tables(
                 f"{table_id}."
             )
 
+        # ----------------------------------------------------
+        # Validate physical row/header alignment.
+        #
+        # This checks the structural extraction only.
+        # Semantic normalization happens later.
+        # ----------------------------------------------------
+
         if (
-            isinstance(headers, list)
-            and isinstance(rows, list)
+            isinstance(
+                headers,
+                list,
+            )
+            and isinstance(
+                rows,
+                list,
+            )
         ):
 
-            header_count = len(headers)
+            header_count = len(
+                headers
+            )
 
-            for row_index, row in enumerate(rows):
+            for row_index, row in enumerate(
+                rows
+            ):
 
                 if len(row) != header_count:
 
